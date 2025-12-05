@@ -160,25 +160,22 @@ if uploaded_file:
         # === 可视化看板 ===
         st.markdown("---")
         st.subheader("📊 分析结果看板")
-        v1, v2 = st.columns(1)
         
-        with v1:
-            if 'AI-退款根因' in result_df.columns:
-                counts = result_df['AI-退款根因'].value_counts().reset_index()
-                counts.columns = ['根因', '数量']
-                # 按数量降序排序
-                counts = counts.sort_values(by='数量', ascending=False)
-                fig = px.bar(counts, x='根因', y='数量', orientation='v', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
-                st.plotly_chart(fig, use_container_width=True)
-                
-        with v2:
-            if c_sku in result_df.columns:
-                sku_counts = result_df[c_sku].value_counts().head(10).reset_index()
-                sku_counts.columns = ['SKU', '退货次数']
-                # 按退货次数降序排序
-                sku_counts = sku_counts.sort_values(by='退货次数', ascending=False)
-                fig2 = px.bar(sku_counts, x='SKU', y='退货次数', orientation='v', title="退货产品TOP 10", text_auto=True, color_discrete_sequence=['#1E90FF'])
-                st.plotly_chart(fig2, use_container_width=True)
+        if 'AI-退款根因' in result_df.columns:
+            counts = result_df['AI-退款根因'].value_counts().reset_index()
+            counts.columns = ['根因', '数量']
+            # 按数量降序排序
+            counts = counts.sort_values(by='数量', ascending=False)
+            fig = px.bar(counts, x='根因', y='数量', orientation='v', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
+            st.plotly_chart(fig, use_container_width=True)
+            
+        if c_sku in result_df.columns:
+            sku_counts = result_df[c_sku].value_counts().head(10).reset_index()
+            sku_counts.columns = ['SKU', '退货次数']
+            # 按退货次数降序排序
+            sku_counts = sku_counts.sort_values(by='退货次数', ascending=False)
+            fig2 = px.bar(sku_counts, x='SKU', y='退货次数', orientation='v', title="退货产品TOP 10", text_auto=True, color_discrete_sequence=['#1E90FF'])
+            st.plotly_chart(fig2, use_container_width=True)
 
         # === 下载 ===
         buffer = io.BytesIO()
