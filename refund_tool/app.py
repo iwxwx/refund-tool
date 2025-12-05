@@ -164,6 +164,8 @@ if uploaded_file:
         
         with v1:
             if 'AI-退款根因' in result_df.columns:
+                counts = result_df['AI-退款根因'].value_counts().reset_index()
+                counts.columns = ['根因', '数量']
                 # 按数量降序排序
                 counts = counts.sort_values(by='数量', ascending=True)
                 fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
@@ -171,6 +173,8 @@ if uploaded_file:
                 
         with v2:
             if c_sku in result_df.columns:
+                sku_counts = result_df[c_sku].value_counts().head(10).reset_index()
+                sku_counts.columns = ['SKU', '退货次数']
                 # 按退货次数降序排序
                 sku_counts = sku_counts.sort_values(by='退货次数', ascending=True)
                 fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="退货产品TOP 10", text_auto=True, color_discrete_sequence=['#1E90FF'])
