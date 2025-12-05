@@ -113,7 +113,7 @@ if uploaded_file:
         with c2: c_asin = st.selectbox("ASIN列", cols, index=get_idx('asin'))
         with c3: c_fnsku = st.selectbox("FNSKU列", cols, index=get_idx('fnsku'))
         with c4: c_reason = st.selectbox("原因列", cols, index=get_idx('reason'))
-        with c5: c_comments = st.selectbox("评论列", cols, index=get_idx('customer-comments'))
+        with c5: c_comments = st.selectbox("评论列", cols, index=get_idx('customer_comments'))
         
         column_map = {'sku': c_sku, 'asin': c_asin, 'fnsku': c_fnsku, 'reason': c_reason, 'comments': c_comments}
 
@@ -164,16 +164,16 @@ if uploaded_file:
         
         with v1:
             if 'AI-退款根因' in result_df.columns:
-                counts = result_df['AI-退款根因'].value_counts().reset_index()
-                counts.columns = ['根因', '数量']
-                fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退款根因分布", text_auto=True)
+                # 按数量降序排序
+                counts = counts.sort_values(by='数量', ascending=True)
+                fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
                 st.plotly_chart(fig, use_container_width=True)
                 
         with v2:
             if c_sku in result_df.columns:
-                sku_counts = result_df[c_sku].value_counts().head(10).reset_index()
-                sku_counts.columns = ['SKU', '退货次数']
-                fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="Top 10 退货产品", text_auto=True)
+                # 按退货次数降序排序
+                sku_counts = sku_counts.sort_values(by='退货次数', ascending=True)
+                fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="退货产品TOP 10", text_auto=True, color_discrete_sequence=['#1E90FF'])
                 st.plotly_chart(fig2, use_container_width=True)
 
         # === 下载 ===
