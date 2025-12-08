@@ -39,6 +39,8 @@ def analyze_single_row(row, column_map, user_identifier):
     
     try:
         response = requests.post(f"{BASE_URL}/workflows/run", json=payload, headers=headers, timeout=60)
+        
+        # 详细记录响应状态
         if response.status_code == 200:
             result_data = response.json()
             outputs = result_data.get('data', {}).get('outputs', {})
@@ -46,12 +48,49 @@ def analyze_single_row(row, column_map, user_identifier):
                 "退款根因": outputs.get('root_cause', '未分类'), 
                 "优化策略": outputs.get('strategy', '-'),
                 "行动计划": outputs.get('action_plan', '-'),
-                "状态": "成功"
+                "状态": "成功",
+                "错误详情": ""
             }
         else:
-            return {"状态": f"失败: {response.status_code}", "退款根因": "API错误", "优化策略": "-", "行动计划": "-"}
+            # 尝试获取错误响应的详细信息
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', '未知错误')
+            except:
+                error_msg = response.text[:200] if response.text else '无响应内容'
+            
+            error_detail = f"HTTP {response.status_code}: {error_msg}"
+            return {
+                "状态": f"失败: {response.status_code}", 
+                "退款根因": "API错误", 
+                "优化策略": "-", 
+                "行动计划": "-",
+                "错误详情": error_detail
+            }
+    except requests.exceptions.Timeout:
+        return {
+            "状态": "超时", 
+            "退款根因": "请求超时", 
+            "优化策略": "-", 
+            "行动计划": "-",
+            "错误详情": "请求超过60秒未响应"
+        }
+    except requests.exceptions.ConnectionError:
+        return {
+            "状态": "连接失败", 
+            "退款根因": "网络错误", 
+            "优化策略": "-", 
+            "行动计划": "-",
+            "错误详情": "无法连接到API服务器"
+        }
     except Exception as e:
-        return {"状态": f"错误: {str(e)}", "退款根因": "请求异常", "优化策略": "-", "行动计划": "-"}
+        return {
+            "状态": f"异常", 
+            "退款根因": "请求异常", 
+            "优化策略": "-", 
+            "行动计划": "-",
+            "错误详情": str(e)
+        }
 
 # ================= 3. 用户登录界面 =================
 if 'user_info' not in st.session_state:
@@ -76,7 +115,7 @@ if not st.session_state.user_info.get('logged_in'):
     st.stop()
 
 # ================= 4. 主工作台 =================
-# 构造用户ID字符串，例如：ZhangSan-Operation
+# 构造用户ID字符串,例如：ZhangSan-Operation
 current_user = st.session_state.user_info
 user_id_str = f"{current_user['name']}-{current_user['dept']}"
 
@@ -150,6 +189,9 @@ if uploaded_file:
         
         start_time = time.time()
         
+        # 用于收集错误信息
+        error_logs = []
+        
         # 线程池并发调用
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
@@ -165,15 +207,65 @@ if uploaded_file:
                     result_df.at[index, 'AI-退款根因'] = res['退款根因']
                     result_df.at[index, 'AI-优化策略'] = res['优化策略']
                     result_df.at[index, 'AI-行动计划'] = res['行动计划']
-                except:
-                    result_df.at[index, 'AI-退款根因'] = "失败"
+                    
+                    # 记录错误信息
+                    if res['状态'] != "成功" and res.get('错误详情'):
+                        error_logs.append({
+                            '行号': index + 2,  # Excel行号(从2开始,因为有表头)
+                            'SKU': str(result_df.at[index, column_map['sku']]),
+                            '错误类型': res['退款根因'],
+                            '错误详情': res['错误详情']
+                        })
+                except Exception as e:
+                    result_df.at[index, 'AI-退款根因'] = "系统异常"
+                    result_df.at[index, 'AI-优化策略'] = "-"
+                    result_df.at[index, 'AI-行动计划'] = "-"
+                    error_logs.append({
+                        '行号': index + 2,
+                        'SKU': str(result_df.at[index, column_map['sku']]),
+                        '错误类型': '系统异常',
+                        '错误详情': str(e)
+                    })
                 
                 completed += 1
                 progress_bar.progress(completed / total)
                 status_text.text(f"正在处理: {completed}/{total}")
 
         st.balloons()
-        st.success("处理完成！请查看下方图表或下载报告。")
+        
+        # 显示处理统计
+        success_count = len(result_df[result_df['AI-退款根因'].notna() & 
+                                       ~result_df['AI-退款根因'].isin(['API错误', '请求超时', '网络错误', '请求异常', '系统异常'])])
+        error_count = len(error_logs)
+        
+        if error_count == 0:
+            st.success(f"✅ 处理完成！成功分析 {success_count}/{total} 条数据")
+        else:
+            st.warning(f"⚠️ 处理完成！成功: {success_count} 条，失败: {error_count} 条")
+            
+            # 显示错误详情
+            with st.expander(f"📋 查看 {error_count} 条错误详情", expanded=True):
+                error_df = pd.DataFrame(error_logs)
+                st.dataframe(error_df, use_container_width=True)
+                
+                # 错误类型统计
+                if len(error_df) > 0:
+                    st.markdown("#### 错误类型分布")
+                    error_type_counts = error_df['错误类型'].value_counts()
+                    for error_type, count in error_type_counts.items():
+                        st.write(f"- **{error_type}**: {count} 条")
+                    
+                    # 提供错误日志下载
+                    error_buffer = io.BytesIO()
+                    with pd.ExcelWriter(error_buffer, engine='xlsxwriter') as writer:
+                        error_df.to_excel(writer, index=False, sheet_name='错误日志')
+                    
+                    st.download_button(
+                        label="📥 下载错误日志",
+                        data=error_buffer.getvalue(),
+                        file_name=f"错误日志_{int(time.time())}.xlsx",
+                        mime="application/vnd.ms-excel"
+                    )
         
         # === 筛选并重命名列 ===
         # 保留指定的列
@@ -221,7 +313,10 @@ if uploaded_file:
             counts.columns = ['根因', '数量']
             # 按数量降序排序，水平条形图需要ascending=True使最高值在顶部
             counts = counts.sort_values(by='数量', ascending=True)
-            fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
+            fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", 
+                        text='数量', color_discrete_sequence=['#FF7F50'])
+            # 设置文字竖直显示
+            fig.update_traces(textangle=0, textposition='outside')
             st.plotly_chart(fig, use_container_width=True)
             
         if 'sku' in final_df.columns:
@@ -229,7 +324,10 @@ if uploaded_file:
             sku_counts.columns = ['SKU', '退货次数']
             # 按退货次数降序排序，水平条形图需要ascending=True使最高值在顶部
             sku_counts = sku_counts.sort_values(by='退货次数', ascending=True)
-            fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="退货产品TOP 10", text_auto=True, color_discrete_sequence=['#1E90FF'])
+            fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="退货产品TOP 10", 
+                         text='退货次数', color_discrete_sequence=['#1E90FF'])
+            # 设置文字竖直显示
+            fig2.update_traces(textangle=0, textposition='outside')
             st.plotly_chart(fig2, use_container_width=True)
 
         # === 下载 ===
