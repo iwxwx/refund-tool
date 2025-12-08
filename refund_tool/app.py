@@ -10,14 +10,9 @@ import io
 st.set_page_config(page_title="亚马逊退款智能分析", layout="wide", page_icon="📊")
 
 # ================= 1. 获取云端密钥 (Secrets) =================
-# 这里的代码会自动去读取 Streamlit Cloud 后台配置的密钥
-# 如果你在本地运行报错，请确保你配置了 .streamlit/secrets.toml 或者临时把这里改成明文
-try:
-    DIFY_API_KEY = st.secrets["DIFY_API_KEY"]
-    BASE_URL = st.secrets["BASE_URL"]
-except:
-    st.error("❌ 未检测到密钥配置！请在 Streamlit Cloud 的 Secrets 中配置 DIFY_API_KEY 和 BASE_URL。")
-    st.stop()
+# 从 Streamlit Cloud 后台 Secrets 中读取配置
+DIFY_API_KEY = st.secrets["DIFY_API_KEY"]
+BASE_URL = st.secrets["BASE_URL"]
 
 # ================= 2. 核心处理逻辑 =================
 def analyze_single_row(row, column_map, user_identifier):
@@ -94,11 +89,29 @@ st.markdown("---")
 uploaded_file = st.file_uploader("上传 Excel 文件 (.xlsx)", type=["xlsx", "csv"])
 
 if uploaded_file:
-    # 读取文件
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+    # 读取文件 - 修复编码问题
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            # 尝试多种常见编码格式
+            try:
+                df = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                uploaded_file.seek(0)  # 重置文件指针
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='gbk')
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    try:
+                        df = pd.read_csv(uploaded_file, encoding='latin1')
+                    except UnicodeDecodeError:
+                        uploaded_file.seek(0)
+                        df = pd.read_csv(uploaded_file, encoding='ISO-8859-1')
+        else:
+            df = pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"❌ 文件读取失败: {str(e)}")
+        st.info("💡 提示：如果是 CSV 文件，请尝试用 Excel 另存为 UTF-8 格式的 CSV，或者直接上传 Excel 文件（.xlsx）")
+        st.stop()
     
     st.success(f"✅ 成功加载 {len(df)} 条数据")
 
@@ -113,7 +126,12 @@ if uploaded_file:
         with c2: c_asin = st.selectbox("ASIN列", cols, index=get_idx('asin'))
         with c3: c_fnsku = st.selectbox("FNSKU列", cols, index=get_idx('fnsku'))
         with c4: c_reason = st.selectbox("原因列", cols, index=get_idx('reason'))
-        with c5: c_comments = st.selectbox("评论列", cols, index=get_idx('customer_comments'))
+        with c5: 
+            # 优先匹配 customer-comments，其次 customer_comments
+            comments_idx = get_idx('customer-comments')
+            if comments_idx == 0 and 'customer-comments' not in cols:
+                comments_idx = get_idx('customer_comments')
+            c_comments = st.selectbox("评论列", cols, index=comments_idx)
         
         column_map = {'sku': c_sku, 'asin': c_asin, 'fnsku': c_fnsku, 'reason': c_reason, 'comments': c_comments}
 
@@ -157,20 +175,57 @@ if uploaded_file:
         st.balloons()
         st.success("处理完成！请查看下方图表或下载报告。")
         
+        # === 筛选并重命名列 ===
+        # 保留指定的列
+        output_columns = []
+        column_rename = {}
+        
+        # 添加原始列
+        if c_sku in result_df.columns:
+            output_columns.append(c_sku)
+            column_rename[c_sku] = 'sku'
+        if c_asin in result_df.columns:
+            output_columns.append(c_asin)
+            column_rename[c_asin] = 'asin'
+        if c_fnsku in result_df.columns:
+            output_columns.append(c_fnsku)
+            column_rename[c_fnsku] = 'fnsku'
+        if c_reason in result_df.columns:
+            output_columns.append(c_reason)
+            column_rename[c_reason] = 'reason'
+        if c_comments in result_df.columns:
+            output_columns.append(c_comments)
+            column_rename[c_comments] = 'customer-comments'
+        
+        # 添加AI生成的列
+        if 'AI-退款根因' in result_df.columns:
+            output_columns.append('AI-退款根因')
+            column_rename['AI-退款根因'] = '退款根因'
+        if 'AI-优化策略' in result_df.columns:
+            output_columns.append('AI-优化策略')
+            column_rename['AI-优化策略'] = '根因优化策略'
+        if 'AI-行动计划' in result_df.columns:
+            output_columns.append('AI-行动计划')
+            column_rename['AI-行动计划'] = '行动计划'
+        
+        # 创建最终输出的DataFrame
+        final_df = result_df[output_columns].copy()
+        final_df = final_df.rename(columns=column_rename)
+        
         # === 可视化看板 ===
         st.markdown("---")
         st.subheader("📊 分析结果看板")
         
-        if 'AI-退款根因' in result_df.columns:
-            counts = result_df['AI-退款根因'].value_counts().reset_index()
+        if '退款根因' in final_df.columns:
+            counts = final_df['退款根因'].value_counts().reset_index()
             counts.columns = ['根因', '数量']
             # 按数量降序排序，水平条形图需要ascending=True使最高值在顶部
             counts = counts.sort_values(by='数量', ascending=True)
             fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", text_auto=True, color_discrete_sequence=['#FF7F50'])
             st.plotly_chart(fig, use_container_width=True)
             
-        if c_sku in result_df.columns:
-            sku_counts = result_df[c_sku].value_counts().head(10).reset_index()
+        if 'sku' in final_df.columns:
+            sku_counts = final_df['sku'].value_counts().head(10).reset_index()
             sku_counts.columns = ['SKU', '退货次数']
             # 按退货次数降序排序，水平条形图需要ascending=True使最高值在顶部
             sku_counts = sku_counts.sort_values(by='退货次数', ascending=True)
@@ -180,7 +235,7 @@ if uploaded_file:
         # === 下载 ===
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            result_df.to_excel(writer, index=False)
+            final_df.to_excel(writer, index=False)
             
         st.download_button(
             label="📥 下载完整分析报告",
