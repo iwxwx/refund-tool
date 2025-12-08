@@ -22,12 +22,16 @@ def analyze_single_row(row, column_map, user_identifier):
     }
     
     # 构造 Dify 输入变量
+    # 注意：comments字段有48字符限制，需要截断
+    comments_raw = str(row.get(column_map['comments'], ''))
+    comments_trimmed = comments_raw[:47] if len(comments_raw) > 47 else comments_raw
+    
     inputs = {
-        "sku": str(row.get(column_map['sku'], '')),
-        "asin": str(row.get(column_map['asin'], '')),
-        "fnsku": str(row.get(column_map['fnsku'], '')),
-        "reason": str(row.get(column_map['reason'], '')),
-        "comments": str(row.get(column_map['comments'], ''))
+        "sku": str(row.get(column_map['sku'], ''))[:100],  # 预防性限制
+        "asin": str(row.get(column_map['asin'], ''))[:20],
+        "fnsku": str(row.get(column_map['fnsku'], ''))[:20],
+        "reason": str(row.get(column_map['reason'], ''))[:100],
+        "comments": comments_trimmed
     }
     
     # 【关键点】将用户信息传给 Dify 的 user 字段
@@ -176,7 +180,13 @@ if uploaded_file:
 
     # 运行按钮
     st.subheader("🚀 批量分析")
-    max_workers = st.slider("并发速度", 1, 20, 10)
+    
+    col_left, col_right = st.columns(2)
+    with col_left:
+        max_workers = st.slider("并发速度", 1, 20, 10)
+    with col_right:
+        st.info("💡 并发数量建议10-15")
+    
     
     if st.button("开始运行", type="primary"):
         progress_bar = st.progress(0)
@@ -315,8 +325,8 @@ if uploaded_file:
             counts = counts.sort_values(by='数量', ascending=True)
             fig = px.bar(counts, x='数量', y='根因', orientation='h', title="退货原因分析", 
                         text='数量', color_discrete_sequence=['#FF7F50'])
-            # 设置文字竖直显示
-            fig.update_traces(textangle=0, textposition='outside')
+            # 设置文字竖直显示，放在条形内侧
+            fig.update_traces(textangle=0, textposition='inside', textfont=dict(color='white', size=14))
             st.plotly_chart(fig, use_container_width=True)
             
         if 'sku' in final_df.columns:
@@ -326,8 +336,8 @@ if uploaded_file:
             sku_counts = sku_counts.sort_values(by='退货次数', ascending=True)
             fig2 = px.bar(sku_counts, x='退货次数', y='SKU', orientation='h', title="退货产品TOP 10", 
                          text='退货次数', color_discrete_sequence=['#1E90FF'])
-            # 设置文字竖直显示
-            fig2.update_traces(textangle=0, textposition='outside')
+            # 设置文字竖直显示，放在条形内侧
+            fig2.update_traces(textangle=0, textposition='inside', textfont=dict(color='white', size=14))
             st.plotly_chart(fig2, use_container_width=True)
 
         # === 下载 ===
